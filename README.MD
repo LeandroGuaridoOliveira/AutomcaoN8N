@@ -1,104 +1,101 @@
+📄 Automação de Importação de Planilhas para SQL Server com Watcher no Google Drive
+🎯 Objetivo
 
-# 📄 Script de Importação de Planilha para Banco de Dados (Versão Final)
+Automatizar o processo de:
 
-## 🎯 Objetivo
-Este script automatiza a **importação de textos gerados pela IA** a partir de uma planilha Excel, inserindo-os diretamente no **SQL Server** nas tabelas:
+Receber uma planilha .xlsx gerada pelo fluxo do N8N (já com textos processados por IA).
 
-- `PUB_TIPOS_TEXTOS`
-- `PUB_TIPOS_TEXTOS_TITULOS`
+Detectar automaticamente quando o arquivo for salvo no Google Drive.
 
-Possui suporte para **modo de teste** com SQLite e **modo de produção** com SQL Server via `pyodbc`.
+Executar o script AutomacaoBanco.py para inserir/atualizar os dados no SQL Server.
 
----
+Registrar logs e organizar arquivos processados.
 
-## 🛠️ Fluxo Geral
+🛠️ Fluxo Geral da Solução
+1. Entrada da planilha
 
-1. **Leitura da planilha**.
-2. **Modelagem dos dados** no formato correto das tabelas do banco.
-3. **Conexão ao banco**:
-   - TESTE → SQLite.
-   - PRODUÇÃO → SQL Server.
-4. **Inserção dos dados**:
-   - TESTE → Inserção simples.
-   - PRODUÇÃO → UPSERT com `MERGE`.
-5. **Validação** (TESTE).
-6. **Registro em log** de todas as ações e erros.
+O N8N gera a planilha final (.xlsx) com os textos.
 
----
+A planilha é enviada automaticamente para uma pasta específica do Google Drive.
 
-## 📂 Estrutura da Planilha
+2. Watcher (watch_run.py)
 
-| id_tipo | Texto Principal | Texto Secundário | Texto Title (opcional) | Texto Meta Description (opcional) |
-|---------|----------------|------------------|------------------------|------------------------------------|
-| 79      | Conteúdo HTML  | Conteúdo HTML    | Título opcional        | Meta description opcional         |
-| 81      | Conteúdo HTML  | Conteúdo HTML    | ...                    | ...                                |
+Fica monitorando a pasta do Drive usando a API do Google.
 
----
+Quando detecta novo arquivo ou atualização:
 
-## 🗄️ Estrutura das Tabelas no Banco
+Baixa o arquivo para um diretório temporário.
 
-### **Tabela 1 – `PUB_TIPOS_TEXTOS`**
-| Coluna         | Origem na planilha | Observação |
-|----------------|-------------------|------------|
-| idTipo         | id_tipo           | Identificador único |
-| TextoPrimario  | Texto Principal   | Texto HTML |
-| TextoSecundario| Texto Secundário  | Texto HTML |
-| Ativo          | Valor fixo = 1    | Sempre ativo |
-| IdConteudo     | NULL              | Sem dados |
-| Header         | NULL              | Sem dados |
+Executa o AutomacaoBanco.py com o arquivo baixado.
 
-### **Tabela 2 – `PUB_TIPOS_TEXTOS_TITULOS`**
-| Coluna               | Origem | Observação |
-|----------------------|--------|------------|
-| idTipo               | id_tipo| Identificador único |
-| TextoTitle           | Texto Title (se existir) | Pode ser preenchido futuramente |
-| TextoMetaDescription | Texto Meta Description (se existir) | Pode ser preenchido futuramente |
-| Ativo                | 1      | Sempre ativo |
-| IdConteudo           | NULL   | Sem dados |
+Registra no processados.json que o arquivo foi processado (para evitar repetição).
 
----
+Move o arquivo para a pasta "Processados" ou "Falha" no Drive (opcional).
 
-## ⚙️ Como Funciona
+3. Script AutomacaoBanco.py
 
-### **1️⃣ Leitura da Planilha**
-Utiliza `pandas.read_excel()` para carregar os dados da aba `"Planilha1"`.
+Lê a planilha.
 
-### **2️⃣ Modelagem dos Dados**
-Cria dois DataFrames (`df_tipos_textos` e `df_tipos_titulos`) com as colunas no formato exato das tabelas.
+Modela os dados para as tabelas:
 
-### **3️⃣ Conexão ao Banco**
-- **TESTE** → SQLite em memória (`sqlite3.connect(":memory:")`).
-- **PRODUÇÃO** → SQL Server (`pyodbc.connect(...)`).
+PUB_TIPOS_TEXTOS
 
-### **4️⃣ Inserção dos Dados**
-- **TESTE** → Inserção simples (`INSERT`).
-- **PRODUÇÃO** → UPSERT com `MERGE` (atualiza se existir, insere se não existir).
+PUB_TIPOS_TEXTOS_TITULOS
 
-### **5️⃣ Validação**
-No modo TESTE, executa consultas `SELECT` para verificar se os dados foram gravados.
+Atualiza os registros existentes e, se necessário, cria novas linhas com seed automático para id_tipo inexistentes.
 
-### **6️⃣ Registro em Log**
-Todos os eventos são gravados no arquivo `importacao.log`:
-- Quantidade de registros processados.
-- Erros de inserção.
-- Conclusão.
+Registra logs detalhados.
 
----
+📂 Estrutura Esperada da Planilha
+id_tipo	Texto Principal	Texto Secundário	Texto Title	Texto Meta Description
+79	HTML	HTML	Título	Meta
+81	HTML	HTML	...	...
+⚙️ Como Configurar
+1. Pré-requisitos
 
-## 🚀 Como Usar
+Python 3.10 ou superior
 
-1. Instale as dependências:
-```bash
-pip install pandas openpyxl pyodbc
-```
+Conta do Google com acesso à pasta do Drive
 
-2. Configure o arquivo Python:
-```python
-MODO = "TESTE"  # ou "PRODUCAO"
-```
+Dependências instaladas:
 
-3. No modo produção, configure a conexão com o SQL Server:
-```python
+pip install pandas openpyxl pyodbc google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+
+2. Configuração do Google API
+
+No Google Cloud Console:
+
+Criar um projeto.
+
+Ativar a Google Drive API.
+
+Criar credenciais OAuth Client ID do tipo "Desktop App".
+
+Baixar o arquivo credentials.json e colocar na mesma pasta do watch_run.py.
+
+Na primeira execução:
+
+O script abrirá o navegador pedindo login.
+
+Escolha a conta correta e permita o acesso.
+
+Será criado o arquivo token.json para uso futuro (não precisa logar de novo).
+
+3. Configuração do Watcher
+
+No watch_run.py:
+
+FOLDER_ID = "ID_DA_PASTA_NO_GOOGLE_DRIVE"
+CREDENTIALS_FILE = "credentials.json"
+TOKEN_FILE = "token.json"
+CHECK_EVERY_SEC = 30  # intervalo de checagem em segundos
+
+4. Configuração do AutomacaoBanco.py
+
+Ajustar MODO para "PRODUCAO" ou "TESTE".
+
+Configurar a string de conexão do SQL Server no modo produção:
+
 conn = pyodbc.connect(
     'DRIVER={ODBC Driver 17 for SQL Server};'
     'SERVER=SEU_SERVIDOR;'
@@ -106,45 +103,48 @@ conn = pyodbc.connect(
     'UID=SEU_USUARIO;'
     'PWD=SUA_SENHA;'
 )
-```
 
-4. Execute o script:
-```bash
-python AutomacaoBanco.py
-```
+🚀 Como Usar
+1. Rodar o Watcher
 
-5. Confira o log no arquivo `importacao.log`.
+No terminal, na pasta do script:
 
----
+python -u watch_run.py
 
 
-```bash
-No SQL SERVER:
+O -u garante saída de log em tempo real.
 
-   1- Checagem rápida pra ver se as tabelas existem.
+O Watcher ficará ativo monitorando a pasta do Google Drive.
 
-      SELECT TOP 1 * FROM PMP.dbo.PUB_TIPOS_TEXTOS;
-      SELECT TOP 1 * FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS;
+Quando detectar novo arquivo .xlsx, ele executa automaticamente o AutomacaoBanco.py.
 
-      -- Mapeamento para derivar id_tipo (se necessário)
-      SELECT TOP 5 * FROM PMP.dbo.PROCESSADO_BUSCA_TIPOS;
+2. Verificar no Banco
 
-      -- Mapa idTipo -> IdConteudo (para seed)
-      SELECT TOP 5 * FROM PMP.dbo.TEMATICOS_CONTEUDO_ITEM;
+Antes de rodar, veja os id_tipo já existentes:
 
-   2- Update Sem o SEED:
-"""
-O que acontece:
+SELECT idTipo, TextoPrimario FROM PMP.dbo.PUB_TIPOS_TEXTOS;
+SELECT idTipo, TextoTitle FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS;
 
-O script filtra os id_tipo da planilha que já existem em PMP.dbo.PUB_TIPOS_TEXTOS.
 
-Ele atualiza:
+Após rodar, verifique novamente para confirmar a atualização:
 
-TextoPrimario, TextoSecundario, Ativo=1 em PUB_TIPOS_TEXTOS.
+SELECT idTipo, TextoPrimario, TextoSecundario, IdConteudo FROM PMP.dbo.PUB_TIPOS_TEXTOS;
+SELECT idTipo, TextoTitle, TextoMetaDescription, IdConteudo FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS;
 
-(se vierem) TextoTitle, TextoMetaDescription, Ativo=1 em PUB_TIPOS_TEXTOS_TITULOS.
+3. Organização de Arquivos no Drive
 
-Para id_tipo que não existem no PMP, nada é atualizado (rowcount=0).
+Processados: arquivos que foram importados com sucesso.
 
-Se a proporção de id_tipo inexistentes passar do limite (--abort-if-missing-ratio, default 35%), ele aborta para evitar “rodada fantasma”.
-```
+Falha: arquivos que geraram erro na importação.
+
+Essa movimentação é feita pelo próprio watch_run.py (se as pastas forem configuradas).
+
+📌 Boas Práticas
+
+Sempre testar com --dry-run no AutomacaoBanco.py antes de atualizar o banco real.
+
+Garantir que a planilha final gerada pelo N8N esteja no formato correto.
+
+Manter backup da pasta de Processados no Drive.
+
+Atualizar credentials.json se mudar de conta do Google.
