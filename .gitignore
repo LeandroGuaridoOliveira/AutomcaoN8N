@@ -39,7 +39,7 @@ config/secret*.*
 .backup.json
 tmp/
 temp/
-
+.json
 # --- IDE / SO ---
 .vscode/
 .idea/
