@@ -172,15 +172,3 @@ FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS WHERE idTipo IN (101,102,103);
 
 ---
 
-## 🧭 Dicas de operação
-- Nome de arquivo **com data**: `planilha_final_DD_MM_YYYY_HH_MM_SS.xlsx` (já configurado no N8N).  
-- Mantenha o watcher rodando em um **terminal dedicado** ou agendado (Windows Task Scheduler).  
-- Faça **backup** da pasta **/Processados** periodicamente.
-
----
-
-## ✅ Conclusão
-Com este fluxo, você consegue:
-- Automatizar de ponta a ponta (N8N → Drive → Watcher → SQL).
-- Garantir consistência com seed controlado e logs.
-- Organizar a pasta do Drive com **Processados** e **Falha**.
