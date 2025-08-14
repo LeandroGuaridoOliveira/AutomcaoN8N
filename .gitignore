@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+.env
+.env.*
+*.db
+*.sqlite
+pip-wheel-metadata/
+dist/
+build/
+*.egg-info/
+
+# --- Logs ---
+*.log
+logs/
+log/
+
+# --- Credenciais / segredos (ajuste os nomes que você usa) ---
+*.key
+*.pem
+*.pfx
+*.crt
+*.cer
+*credential*.json
+*credentials*.json
+*service*account*.json
+secrets/
+config/secret*.*
+*.token
+*.tokens
+
+# --- n8n / artefatos temporários ---
+.exported.json
+.backup.json
+tmp/
+temp/
+
+# --- IDE / SO ---
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
