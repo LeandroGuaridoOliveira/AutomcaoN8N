@@ -1,150 +1,186 @@
-📄 Automação de Importação de Planilhas para SQL Server com Watcher no Google Drive
-🎯 Objetivo
+# 📄 Automação: N8N + Google Drive + Watcher + SQL Server
 
-Automatizar o processo de:
+## 🎯 Objetivo
+- Gerar uma planilha **.xlsx** no N8N (após os agentes de IA), enviar ao **Google Drive** e
+- Ter um **watcher** (script Python) que detecta o novo arquivo, baixa e executa o **AutomacaoBanco.py** para atualizar o **SQL Server**.
+- Organizar arquivos em **/Processados** e **/Falha** e registrar logs.
 
-Receber uma planilha .xlsx gerada pelo fluxo do N8N (já com textos processados por IA).
+---
 
-Detectar automaticamente quando o arquivo for salvo no Google Drive.
+## 🧭 Visão geral do fluxo
+1) **N8N**: lê Sheets → passa por 2 agentes de IA → **Spreadsheet File** cria XLSX → **Google Drive (Upload)** envia para **/Entrada**.  
+2) **Watcher (`watch_run.py`)**: monitora a pasta do Drive; quando acha um XLSX novo/atualizado:
+   - Baixa para pasta temporária e **sanitiza o nome** (sem “:” e quebras de linha).
+   - Executa `AutomacaoBanco.py` com os parâmetros definidos.
+   - Se rodar OK → registra em `processados.json` e (opcional) **move no Drive para /Processados**.  
+     Se falhar → (opcional) **move para /Falha**.
+3) **AutomacaoBanco.py**: lê o XLSX e atualiza:
+   - `PMP.dbo.PUB_TIPOS_TEXTOS` (TextoPrimario, TextoSecundario, Ativo=1)  
+   - `PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS` (TextoTitle, TextoMetaDescription, Ativo=1)  
+   - Se `--auto-seed`: cria linhas-base quando `idTipo` não existe (com mapeamento `IdConteudo`).
 
-Executar o script AutomacaoBanco.py para inserir/atualizar os dados no SQL Server.
+---
 
-Registrar logs e organizar arquivos processados.
+## 📦 Requisitos
+- **Python 3.10+** (3.12 OK).
+- Pacotes:
+  ```bash
+  pip install pandas openpyxl pyodbc google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+  ```
+- **ODBC Driver 17** for SQL Server (Windows).
 
-🛠️ Fluxo Geral da Solução
-1. Entrada da planilha
+---
 
-O N8N gera a planilha final (.xlsx) com os textos.
+## ⚙️ Configuração do Google (OAuth)
+1. No **Google Cloud Console** → **APIs & Services** → **Library** → ative **Google Drive API** (e **Google Sheets API** se precisar).  
+2. **Credentials** → **Create Credentials** → **OAuth client ID** → **Desktop app** → faça download do `credentials.json`.  
+3. Coloque o `credentials.json` **na mesma pasta do `watch_run.py`**. Na primeira execução, abrirá o navegador, você loga e é criado o `token.json`.
 
-A planilha é enviada automaticamente para uma pasta específica do Google Drive.
+> **Dica:** se trocar de conta, apague `token.json` e rode novamente para refazer o login.
 
-2. Watcher (watch_run.py)
+---
 
-Fica monitorando a pasta do Drive usando a API do Google.
+## 🗂️ Pastas no Google Drive
+Crie (ou defina) estas pastas e anote os **IDs** (parte após `folders/` na URL):
+```
+/Entrada
+/Processados
+/Falha
+```
+Compartilhe a pasta com a conta que você usará no OAuth (ou com a **Service Account**, se usar SA).
+No `watch_run.py`, você pode definir via **variáveis de ambiente**:
+```
+DRIVE_FOLDER_ENTRADA_ID=<id>
+DRIVE_FOLDER_PROCESSADOS_ID=<id>
+DRIVE_FOLDER_FALHA_ID=<id>
+```
 
-Quando detecta novo arquivo ou atualização:
+---
 
-Baixa o arquivo para um diretório temporário.
+## 🧩 N8N – configuração mínima
+- **Spreadsheet File** → *Create spreadsheet*  
+  - **Binary Property:** `data`  
+  - **File Format:** `XLSX`  
+  - **Sheet Name:** `Planilha1`  
+  - **File Name (Expression):**
+    ```
+    planilha_final_{{ 
+      (d => 
+        String(d.getDate()).padStart(2,'0') + '_' +
+        String(d.getMonth() + 1).padStart(2,'0') + '_' +
+        d.getFullYear() + '_' +
+        String(d.getHours()).padStart(2,'0') + '_' +
+        String(d.getMinutes()).padStart(2,'0') + '_' +
+        String(d.getSeconds()).padStart(2,'0')
+      )(new Date()) 
+    }}.xlsx
+    ```
+- **Google Drive → Upload**  
+  - **Use Binary Data:** `true`  
+  - **Binary Property:** `data`  
+  - **Parent Folder:** `/Entrada`  
+  - (**Opcional**) File Name com a **mesma expression** acima (ou deixe o do Spreadsheet File).
 
-Executa o AutomacaoBanco.py com o arquivo baixado.
+> **Importante:** ative o **modo Expression (fx)** no campo *File Name*; se aparecer literalmente com `{{...}}`, você está em modo texto.
 
-Registra no processados.json que o arquivo foi processado (para evitar repetição).
+---
 
-Move o arquivo para a pasta "Processados" ou "Falha" no Drive (opcional).
-
-3. Script AutomacaoBanco.py
-
-Lê a planilha.
-
-Modela os dados para as tabelas:
-
-PUB_TIPOS_TEXTOS
-
-PUB_TIPOS_TEXTOS_TITULOS
-
-Atualiza os registros existentes e, se necessário, cria novas linhas com seed automático para id_tipo inexistentes.
-
-Registra logs detalhados.
-
-📂 Estrutura Esperada da Planilha
-id_tipo	Texto Principal	Texto Secundário	Texto Title	Texto Meta Description
-79	HTML	HTML	Título	Meta
-81	HTML	HTML	...	...
-⚙️ Como Configurar
-1. Pré-requisitos
-
-Python 3.10 ou superior
-
-Conta do Google com acesso à pasta do Drive
-
-Dependências instaladas:
-
-pip install pandas openpyxl pyodbc google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
-
-2. Configuração do Google API
-
-No Google Cloud Console:
-
-Criar um projeto.
-
-Ativar a Google Drive API.
-
-Criar credenciais OAuth Client ID do tipo "Desktop App".
-
-Baixar o arquivo credentials.json e colocar na mesma pasta do watch_run.py.
-
-Na primeira execução:
-
-O script abrirá o navegador pedindo login.
-
-Escolha a conta correta e permita o acesso.
-
-Será criado o arquivo token.json para uso futuro (não precisa logar de novo).
-
-3. Configuração do Watcher
-
-No watch_run.py:
-
-FOLDER_ID = "ID_DA_PASTA_NO_GOOGLE_DRIVE"
+## 🐍 Watcher (`watch_run.py`)
+### Parâmetros principais (no código ou por env)
+```python
+FOLDER_ID = "ID_DA_PASTA_ENTRADA"     # se a listagem usa uma pasta única
 CREDENTIALS_FILE = "credentials.json"
 TOKEN_FILE = "token.json"
-CHECK_EVERY_SEC = 30  # intervalo de checagem em segundos
+CHECK_EVERY_SEC = 30
+```
+**Movimentação opcional** (por env):
+```
+DRIVE_FOLDER_ENTRADA_ID     = <id>
+DRIVE_FOLDER_PROCESSADOS_ID = <id>
+DRIVE_FOLDER_FALHA_ID       = <id>
+```
 
-4. Configuração do AutomacaoBanco.py
-
-Ajustar MODO para "PRODUCAO" ou "TESTE".
-
-Configurar a string de conexão do SQL Server no modo produção:
-
-conn = pyodbc.connect(
-    'DRIVER={ODBC Driver 17 for SQL Server};'
-    'SERVER=SEU_SERVIDOR;'
-    'DATABASE=SEU_DATABASE;'
-    'UID=SEU_USUARIO;'
-    'PWD=SUA_SENHA;'
-)
-
-🚀 Como Usar
-1. Rodar o Watcher
-
-No terminal, na pasta do script:
-
+### Execução
+```bash
 python -u watch_run.py
+```
+- `-u` = logs sem buffer (aparecem na hora).  
+- Na 1ª vez, abre o navegador para login do Google.  
+- Log detalhado também é salvo em **`watcher_debug.log`** (injetado pelo “hardmode” de debug).
 
+### Como funciona internamente
+1. Autentica no Drive (usa `credentials.json` + `token.json`).  
+2. Lista arquivos .xlsx na pasta definida.  
+3. Para cada arquivo, monta uma “assinatura” (`name`, `modifiedTime`, `md5Checksum`) e compara com `processados.json`.  
+4. Se for novo/atualizado:
+   - Sanitiza o nome (remove caracteres inválidos no Windows, como `:` e quebras de linha).
+   - Baixa para um `TemporaryDirectory`.
+   - Executa `AutomacaoBanco.py <arquivo baixado>`
+   - Se **sucesso**: grava em `processados.json` e (se configurado) move para **/Processados**.  
+     Se **falha**: (se configurado) move para **/Falha**.
+   
+> O watcher **não reprocessa** o mesmo `fileId` com o mesmo `md5Checksum`.
 
-O -u garante saída de log em tempo real.
+---
 
-O Watcher ficará ativo monitorando a pasta do Google Drive.
+## 🏦 AutomacaoBanco.py – resumo de uso
+### DRY‑RUN (sem gravar; mostra seeds)
+```bash
+python AutomacaoBanco.py "C:	mp\planilha.xlsx" --auto-seed --dry-run --max-seed 100 --pick-idconteudo min --map-table TEMATICOS_CONTEUDO_ITEM --tipo-col IDTIPO --conteudo-col ID --default-idconteudo 1
+```
+### Produção (aplica UPDATEs e SEEDs)
+```bash
+python AutomacaoBanco.py "C:	mp\planilha.xlsx" --auto-seed --max-seed 100 --pick-idconteudo min --map-table TEMATICOS_CONTEUDO_ITEM --tipo-col IDTIPO --conteudo-col ID --default-idconteudo 1
+```
+- Preenche `TextoPrimario` / `TextoSecundario` / `Ativo=1` e SEO (quando presentes).  
+- Garante `id_tipo` válido (direto da planilha ou derivado de `id_cat/id_grupo` se implementado).  
+- Cria base quando o `idTipo` não existe (seed).
 
-Quando detectar novo arquivo .xlsx, ele executa automaticamente o AutomacaoBanco.py.
+---
 
-2. Verificar no Banco
+## 🔍 Validação no SQL (antes/depois)
+```sql
+-- Antes (exemplo com IDs da planilha)
+SELECT idTipo, TextoPrimario FROM PMP.dbo.PUB_TIPOS_TEXTOS WHERE idTipo IN (101,102,103);
+SELECT idTipo, TextoTitle FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS WHERE idTipo IN (101,102,103);
 
-Antes de rodar, veja os id_tipo já existentes:
+-- Depois
+SELECT idTipo, TextoPrimario, TextoSecundario, Ativo
+FROM PMP.dbo.PUB_TIPOS_TEXTOS WHERE idTipo IN (101,102,103);
 
-SELECT idTipo, TextoPrimario FROM PMP.dbo.PUB_TIPOS_TEXTOS;
-SELECT idTipo, TextoTitle FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS;
+SELECT idTipo, TextoTitle, TextoMetaDescription, Ativo
+FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS WHERE idTipo IN (101,102,103);
+```
 
+---
 
-Após rodar, verifique novamente para confirmar a atualização:
+## 🧯 Troubleshooting
+- **Nada aparece no terminal / fecha sozinho** → rode com:
+  ```bash
+  python -u -X dev watch_run.py
+  ```
+  e consulte `watcher_debug.log` na mesma pasta.  
+- **Erro `Credentials.refresh() missing 'request'`** → importe e use:
+  ```python
+  from google.auth.transport.requests import Request
+  creds.refresh(Request())
+  ```
+- **`FileNotFoundError: credentials.json`** → coloque o `credentials.json` na pasta do script (ou ajuste o caminho).  
+- **`Invalid argument` ao salvar** → o nome tem `:`/quebras de linha. Use a sanitização (o watcher já trata).  
+- **Token inválido/corrompido** → apague `token.json` e rode de novo para refazer o login.  
+- **Horário errado no nome** → use expressão de data **local** no N8N (sem `toISOString()`) como no exemplo acima.
 
-SELECT idTipo, TextoPrimario, TextoSecundario, IdConteudo FROM PMP.dbo.PUB_TIPOS_TEXTOS;
-SELECT idTipo, TextoTitle, TextoMetaDescription, IdConteudo FROM PMP.dbo.PUB_TIPOS_TEXTOS_TITULOS;
+---
 
-3. Organização de Arquivos no Drive
+## 🧭 Dicas de operação
+- Nome de arquivo **com data**: `planilha_final_DD_MM_YYYY_HH_MM_SS.xlsx` (já configurado no N8N).  
+- Mantenha o watcher rodando em um **terminal dedicado** ou agendado (Windows Task Scheduler).  
+- Faça **backup** da pasta **/Processados** periodicamente.
 
-Processados: arquivos que foram importados com sucesso.
+---
 
-Falha: arquivos que geraram erro na importação.
-
-Essa movimentação é feita pelo próprio watch_run.py (se as pastas forem configuradas).
-
-📌 Boas Práticas
-
-Sempre testar com --dry-run no AutomacaoBanco.py antes de atualizar o banco real.
-
-Garantir que a planilha final gerada pelo N8N esteja no formato correto.
-
-Manter backup da pasta de Processados no Drive.
-
-Atualizar credentials.json se mudar de conta do Google.
+## ✅ Conclusão
+Com este fluxo, você consegue:
+- Automatizar de ponta a ponta (N8N → Drive → Watcher → SQL).
+- Garantir consistência com seed controlado e logs.
+- Organizar a pasta do Drive com **Processados** e **Falha**.
